@@ -185,11 +185,16 @@ workspaces/ws_[name]/
 │   └── nb_dq_[name].py                 (DQ gate notebook — L1 workspaces)
 ├── data_contracts/
 │   └── contract_[table].yaml           (L2 workspaces — one per Gold table)
-├── speckit/
-│   ├── spec_sheet.md                   ← workspace spec (layer, SLA, pipelines, DQ, security)
-│   ├── entity_model.md                 ← table defs, PII fields, business keys, relationships
-│   ├── dq_rules_subset.yaml            ← pre-filtered DQ rules for this workspace
-│   └── implementation_checklist.md     ← build checklist (infra → pipelines → DQ → CI/CD → handover)
+├── speckit/                             ← GitHub Speckit-compatible handover bundle
+│   ├── spec.md                         ← Speckit spec: user stories, acceptance criteria, constraints
+│   ├── plan.md                         ← Speckit plan: tech decisions, architecture, phase gates
+│   ├── data-model.md                   ← entity/schema definitions, PII fields, business keys
+│   ├── research.md                     ← library comparisons, pattern choices, open questions
+│   ├── contracts/                      ← data contracts, DQ rule contracts, pipeline event contracts
+│   │   ├── contract_[table].yaml
+│   │   └── dq_contract_[ws].yaml
+│   ├── quickstart.md                   ← key validation scenarios and smoke-test guide
+│   └── tasks.md                        ← executable task list with parallelisation markers [P]
 └── cicd/
     ├── deploy.yml                       ← CI/CD pipeline (GitHub Actions or ADO)
     └── validate.yml                     ← PR validation pipeline
@@ -411,55 +416,287 @@ consumers:
 ```
 Generate the column list from the workspace MD file's Gold table definitions.
 
-### `workspaces/ws_[name]/speckit/` — Implementation handover bundle
-The speckit is generated for **every workspace** (L1, L2, L3, and supporting).
-Its purpose is to put everything the assigned engineer needs in one place so they
-can open the folder and start building without hunting through Phase 2 and Phase 3
-outputs. The four files are:
+### `workspaces/ws_[name]/speckit/` — GitHub Speckit-compatible handover bundle
 
-**`spec_sheet.md`** — copy of the Phase 2 workspace MD file for this workspace.
-Contains layer, domain, SLA tier, data classification, capacity, pipeline list,
-key Silver/Gold tables, DQ rules applied, downstream consumers, and security groups.
+The speckit folder is generated for **every workspace** (L1, L2, L3, and supporting).
+Its structure mirrors [GitHub Speckit](https://github.com/github/spec-kit) — the
+Spec-Driven Development toolkit — so that the AI agent or engineer working on each
+workspace can open the folder and build directly from the spec without hunting through
+Phase 2 and Phase 3 outputs. The seven artefacts are:
 
-**`entity_model.md`** — synthesised view of the workspace's Delta tables and
-logical entities. For each table: lakehouse name, partition strategy, surrogate
-and business keys, PII field list (for GDPR Art.17 erasure scope), and key
-relationships (FK joins, OneLake shortcut dependencies). For L2 workspaces: which
-L1 Silver tables feed each Gold table. For supporting workspaces: operational table
-dependencies.
+---
 
-**`dq_rules_subset.yaml`** — the DQ rules from `governance/dq_rules_catalogue.json`
-pre-filtered to this workspace. Include all domain-specific rules AND all GDPR
-platform rules for L1 workspaces that handle personal data. Format:
+**`spec.md`** — the Speckit feature specification for this workspace. Written in
+Spec-Driven Development (SDD) format: WHAT the workspace delivers and WHY, not HOW
+to implement it. Mark unresolved design questions with `[NEEDS CLARIFICATION: question]`.
+
+Structure:
+```markdown
+# Spec: [ws_name]
+
+## Overview
+[One-paragraph description of what this workspace does and its role in the platform]
+
+## User Stories
+- As a [role], I want [capability] so that [business value]
+
+## Acceptance Criteria
+- [ ] [Measurable, testable criterion — e.g. "Silver table refreshes within P2 SLA (24h)"]
+
+## Non-Functional Requirements
+- Data classification: [Public | Internal | Confidential | Restricted]
+- SLA tier: [P1 | P2 | P3]
+- Regulatory: [GDPR / AÜG / none]
+
+## Constraints & Dependencies
+- Upstream source systems: [list]
+- Downstream consumers: [list]
+- [NEEDS CLARIFICATION: any open questions]
+
+## Out of Scope
+- [Explicit exclusions]
+```
+
+---
+
+**`plan.md`** — the Speckit implementation plan. Translates the spec into concrete
+technical decisions with documented rationale. Each tech choice must trace back to
+a specific acceptance criterion or constraint.
+
+Structure:
+```markdown
+# Plan: [ws_name]
+
+## Phase -1: Pre-Implementation Gates
+
+### Simplicity Gate
+- [ ] Workspace uses standard Medallion layers (Bronze/Silver/Gold) — no custom layers?
+- [ ] No future-proofing: only tables/pipelines in scope are built now?
+
+### Integration-First Gate
+- [ ] Data contracts defined (see contracts/) before pipeline code written?
+- [ ] DQ rules defined before Notebook code written?
+
+## Architecture Decisions
+| Decision | Choice | Rationale | Traces to |
+|----------|--------|-----------|-----------|
+
+## Fabric Items to Create
+| Item type | Name | Purpose |
+|-----------|------|---------|
+
+## Pipeline Design
+[Ingest → Bronze → DQ gate → Silver → (OneLake shortcut for L2) flow]
+
+## Security Model
+[AAD groups, roles, RLS predicates if applicable]
+
+## Complexity Tracking
+[Document any justified deviations from the Simplicity Gate]
+```
+
+---
+
+**`data-model.md`** — the full entity and schema model for this workspace. Every
+Delta table is listed with its fields, types, keys, and PII scope.
+
+Structure:
+```markdown
+# Data Model: [ws_name]
+
+## Entities
+
+### [entity_name]
+- **Lakehouse**: lh_[tier]_[ws_short_name]
+- **Layer**: bronze | silver | gold
+- **Partition by**: [column]
+- **Z-order by**: [columns]
+- **Surrogate key**: [field]_sk
+- **Business keys**: [field(s)]
+- **PII fields** (GDPR Art.17 erasure scope): [fields]
+
+| Field | Type | Nullable | Role | Description |
+|-------|------|----------|------|-------------|
+| [name] | string\|integer\|decimal\|date\|timestamp\|boolean | true\|false | PK\|BK\|FK\|ATTR\|MEASURE\|AUDIT | [description] |
+
+## Key Relationships
+- [entity_A] → [entity_B] ([cardinality], join key: [field])
+
+## OneLake Shortcut Dependencies (L2 workspaces)
+- [shortcut_name] → onelake://[l1_workspace]/[lakehouse]/Tables/[table]
+```
+
+---
+
+**`research.md`** — technical research notes captured during Phase 2 and Phase 4.
+Includes library options considered, patterns evaluated, and the rationale for choices
+made. Written to answer the question an engineer will ask when they pick up the spec:
+"Why did we do it this way?"
+
+Structure:
+```markdown
+# Research: [ws_name]
+
+## Pipeline Pattern
+[Why metadata-driven ingestion was chosen; alternatives considered]
+
+## DQ Gate Approach
+[Why PySpark notebook gate vs inline Dataflow validation]
+
+## Scheduling Strategy
+[SLA tier → trigger frequency mapping and why]
+
+## Open Questions
+- [Any unresolved technical decisions — flag for architect review]
+```
+
+---
+
+**`contracts/`** — versioned data and DQ contracts for this workspace.
+
+**`contracts/contract_[table].yaml`** — one file per Gold table (L2 workspaces) or
+per Silver table that is consumed cross-workspace (L1 workspaces):
 
 ```yaml
-# DQ Rules Subset: [ws_name]
+contract_id: contract-[ws-short-name]-[table]
+version: "1.0"
+workspace: [ws_name]
+table: [table_name]
+layer: silver | gold
+effective_from: "[YYYY-MM-DD]"
+owner: [domain owner team]
+grain: "[one row per ...]"
+columns:
+  - name: [column_name]
+    type: string | integer | decimal | timestamp | boolean
+    nullable: true | false
+    role: PK | BK | FK | ATTR | MEASURE | AUDIT
+    description: "[What this column contains]"
+    pii: true | false
+    classification: Public | Internal | Confidential | Restricted
+schema_drift_action: alert_and_pause | alert_only | ignore
+consumers:
+  - workspace: [consumer_workspace_name]
+    model: [semantic model or pipeline name]
+```
+
+**`contracts/dq_contract_[ws].yaml`** — the DQ rule contract for this workspace.
+Pre-filtered from `governance/dq_rules/dq_rules_catalogue.json`. Defines every
+rule the DQ gate notebook will enforce at Bronze→Silver promotion time:
+
+```yaml
+# DQ Contract: [ws_name]
 # Source: governance/dq_rules/dq_rules_catalogue.json
+workspace: [ws_name]
+effective_from: "[YYYY-MM-DD]"
 rules:
   - rule_id: DQ-[DOMAIN]-[NNN]
-    domain: [domain_code]
+    rule_name: [entity]_[field]_[check_type]
     target_table: [table_name]
-    column: [column_name]
-    check_type: not_null | unique | regex | range | referential | custom_sql
-    severity: hard_block | quarantine | warn | monitor
-    action_on_fail: block | quarantine | warn | log
+    column: [column_name]          # omit for table-level rules
+    check_type: not_null | unique | regex | range | referential | enum | cross_field | row_count_drift | duplicate_bk
+    severity: mandatory_gate | monitoring | recommended | optional
+    action_on_fail: quarantine | warn | log
+    threshold: [value]             # for range / completeness / drift rules
+    pattern: "[regex]"             # for regex rules
+    allowed_values: []             # for enum rules
+    cross_field_expr: "[expr]"     # for cross-field rules
     version: "1.0"
     effective_from: "[YYYY-MM-DD]"
 ```
 
-**`implementation_checklist.md`** — a step-by-step build checklist tailored to
-workspace type (L1 / L2 / L3 / GOV / OPS). Structure:
-- **Infrastructure**: Azure resources deployed, workspace created, AAD groups, SP registered
-- **Data Lakehouse**: Lakehouses created, Delta schemas applied, metadata seeded
-- **Pipelines**: ingest + transform deployed, DQ notebook deployed, log events tested
-- **Data Quality**: DQ rules loaded, gate run against sample data, quarantine table verified
-- **Regulatory** (L1 DE workspaces): AÜG equal-pay / critical / hard-block thresholds tested
-- **GDPR**: consent check, residency check, erasure field present, PII pseudonymised at Gold
-- **CI/CD**: GitHub Secrets configured, deploy.yml passing on develop, validate.yml on PR
-- **Handover**: README approved, Purview lineage verified, SLA baseline confirmed
+Severity semantics:
+- `mandatory_gate` — failure blocks Bronze→Silver promotion; record quarantined
+- `monitoring` — failure logged to Governance workspace, alert raised, processing continues
+- `recommended` — failure logged only
+- `optional` — informational
 
-The engineer assigned to each workspace works through the checklist top-to-bottom
-and checks off items before marking the workspace "Ready for QA".
+---
+
+**`quickstart.md`** — the smoke-test and key validation guide for the engineer
+accepting delivery of the workspace. Lists the minimum set of scenarios to run to
+confirm the workspace is working correctly end-to-end.
+
+Structure:
+```markdown
+# Quickstart: [ws_name]
+
+## Pre-requisites
+- [ ] Infrastructure deployed (see infra/README.md)
+- [ ] Workspace created and capacity assigned
+- [ ] Governance workspace healthy (DQ rules loaded)
+
+## Validation Scenarios
+
+### Scenario 1: Happy path ingest
+1. Seed source system with [N] test records
+2. Trigger ingest pipeline manually
+3. Verify records appear in Bronze Lakehouse
+4. Trigger transform pipeline
+5. Verify clean records in Silver, zero in quarantine
+
+### Scenario 2: DQ gate blocks bad data
+1. Seed source with 1 record missing mandatory [field]
+2. Run full pipeline
+3. Verify record appears in quarantine table, not Silver
+4. Verify DQ score logged to Governance workspace
+
+### Scenario 3: SLA compliance
+1. Check last successful pipeline run timestamp
+2. Confirm delta < [P1=4h | P2=24h | P3=72h]
+3. Verify SLA status in Operations dashboard
+```
+
+---
+
+**`tasks.md`** — the executable task list for the engineer building this workspace.
+Tasks are derived from the plan and contracts. Independent tasks are marked `[P]`
+(parallelisable). The engineer works top-to-bottom and ticks off tasks before
+marking the workspace "Ready for QA".
+
+Structure:
+```markdown
+# Tasks: [ws_name]
+
+## Parallel Group 1 — Infrastructure Setup [P]
+- [ ] [P] Deploy Azure infrastructure (`infra/scripts/deploy_infra.sh --env dev`)
+- [ ] [P] Create Fabric workspace via `create_fabric_workspaces.ps1`
+- [ ] [P] Create AAD groups and assign roles (see plan.md → Security Model)
+
+## Group 2 — Lakehouse Setup (after Group 1)
+- [ ] Create Bronze Lakehouse: lh_bronze_[ws_short_name]
+- [ ] Create Silver Lakehouse: lh_silver_[ws_short_name]
+- [ ] Apply Delta schemas from `schemas/*.json`
+- [ ] Seed pipeline metadata: `metadata/pipeline_metadata.json`
+
+## Parallel Group 3 — Contract + DQ Setup [P]
+- [ ] [P] Register data contract with Governance workspace (see contracts/)
+- [ ] [P] Load DQ rules from `contracts/dq_contract_[ws].yaml` to Governance
+
+## Group 4 — Pipeline Deployment (after Groups 2 & 3)
+- [ ] Deploy ingest pipeline and run end-to-end test
+- [ ] Deploy transform pipeline + DQ gate notebook
+- [ ] Verify quarantine table is created and DQ scores logged
+
+## Group 5 — Regulatory Checks (L1 workspaces handling personal data)
+- [ ] GDPR consent check (DQ-GDPR-001) verified
+- [ ] Data residency check (DQ-GDPR-003) verified
+- [ ] Erasure field (`erasure_requested_at`) present in PII tables
+- [ ] PII fields pseudonymised at Gold layer boundary
+- [ ] [DE workspaces only] AÜG hard-block thresholds tested
+
+## Group 6 — CI/CD
+- [ ] Configure GitHub Secrets (DEV_KEYVAULT_URI, PROD_KEYVAULT_URI)
+- [ ] `cicd/deploy.yml` passes on `develop` branch
+- [ ] `cicd/validate.yml` PR validation passing
+
+## Handover Gate
+- [ ] All Quickstart scenarios pass (see quickstart.md)
+- [ ] README.md reviewed and approved by domain owner
+- [ ] Purview lineage verified for all pipelines
+- [ ] SLA baseline confirmed in Operations dashboard
+- [ ] Workspace marked `ready` in `infra/workspace_catalogue.json`
+```
 
 ### `workspaces/ws_[name]/cicd/deploy.yml`
 GitHub Actions (or Azure DevOps YAML — generate the appropriate format based on the
@@ -882,7 +1119,7 @@ Present all outputs. Confirm:
 - [ ] Every workspace from Phase 2 has a folder in `workspaces/`
 - [ ] Every workspace has an `entities/` folder with one YAML per logical entity
 - [ ] Every workspace has a `schemas/` folder with Delta schema JSON for every Silver/Gold table
-- [ ] Every workspace has a complete `speckit/` bundle (spec_sheet · entity_model · dq_rules_subset · checklist)
+- [ ] Every workspace has a complete GitHub Speckit-compatible `speckit/` bundle (spec.md · plan.md · data-model.md · research.md · contracts/ · quickstart.md · tasks.md)
 - [ ] Every L1 workspace has ingest pipeline JSON, transform pipeline JSON, and DQ notebook
 - [ ] Every L2 workspace has data contracts for all Gold tables
 - [ ] Every workspace has a CI/CD deploy and validate pipeline
@@ -894,8 +1131,9 @@ Present all outputs. Confirm:
 When confirmed, state:
 
 > **Phase 4 complete.** Implementation scaffold generated.
-> [N] workspace folders, [N] entity YAML files, [N] Delta schema files, [N] speckit bundles,
-> [N] pipeline templates, [N] CI/CD pipelines, [N] data contracts saved to `p4-outputs/`.
+> [N] workspace folders, [N] entity YAML files, [N] Delta schema files,
+> [N] GitHub Speckit-compatible bundles (spec · plan · data-model · research · contracts · quickstart · tasks),
+> [N] pipeline templates, [N] CI/CD pipelines saved to `p4-outputs/`.
 > The engineering team can begin building immediately from this scaffold.
 > `p4-outputs/cost_estimates.md` contains the final TCO: monthly Fabric operational cost,
 > annual projection, one-time build costs, and 4-phase AI cost summary.
@@ -949,8 +1187,16 @@ p4-outputs/
     │   ├── schemas/                       ← Delta schema JSON files
     │   ├── pipelines/
     │   ├── notebooks/
-    │   ├── data_contracts/
-    │   ├── speckit/                       ← implementation handover bundle
+    │   ├── speckit/                       ← GitHub Speckit-compatible handover bundle
+    │   │   ├── spec.md                    ← SDD feature specification
+    │   │   ├── plan.md                    ← implementation plan with phase gates
+    │   │   ├── data-model.md              ← entity/schema definitions
+    │   │   ├── research.md                ← pattern choices and open questions
+    │   │   ├── contracts/                 ← data + DQ contracts
+    │   │   │   ├── contract_[table].yaml
+    │   │   │   └── dq_contract_[ws].yaml
+    │   │   ├── quickstart.md              ← smoke-test validation guide
+    │   │   └── tasks.md                   ← executable task list with [P] markers
     │   └── cicd/
     └── ws_[name_N]/
         └── ...
